@@ -59,6 +59,8 @@ ALL_OUTPUT_TYPES = [
     "multiple_choice",
     "generate_until",
 ]
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
 
 @dataclass
@@ -867,11 +869,17 @@ class ConfigurableTask(Task):
                 hf_home = os.path.expanduser(hf_home)
                 cache_dir = dataset_kwargs["cache_dir"]
                 cache_dir = os.path.join(hf_home, cache_dir)
+                local_path = os.path.join(hf_home,self.DATASET_PATH)
+                # print(hf_home)
+                # print(cache_dir)
+                # print(local_path    )
                 accelerator = Accelerator()
                 if accelerator.is_main_process:
                     force_download = dataset_kwargs.get("force_download", False)
                     force_unzip = dataset_kwargs.get("force_unzip", False)
-                    cache_path = snapshot_download(repo_id=self.DATASET_PATH, repo_type="dataset", force_download=force_download, etag_timeout=60)
+                    # print(f"download from {self.DATASET_PATH}")
+                    # cache_path = snapshot_download(repo_id=self.DATASET_PATH, repo_type="dataset", force_download=force_download, etag_timeout=60)
+                    cache_path = local_path
                     zip_files = glob(os.path.join(cache_path, "**/*.zip"), recursive=True)
                     tar_files = glob(os.path.join(cache_path, "**/*.tar*"), recursive=True)
 
@@ -952,8 +960,15 @@ class ConfigurableTask(Task):
             if "local_files_only" in dataset_kwargs:
                 dataset_kwargs.pop("local_files_only")
 
+        # self.dataset = datasets.load_dataset(
+        #     path=self.DATASET_PATH,
+        #     name=self.DATASET_NAME,
+        #     download_mode=datasets.DownloadMode.REUSE_DATASET_IF_EXISTS,
+        #     download_config=download_config,
+        #     **dataset_kwargs if dataset_kwargs is not None else {},
+        # )
         self.dataset = datasets.load_dataset(
-            path=self.DATASET_PATH,
+            path=local_path,
             name=self.DATASET_NAME,
             download_mode=datasets.DownloadMode.REUSE_DATASET_IF_EXISTS,
             download_config=download_config,
