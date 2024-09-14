@@ -4,6 +4,7 @@ import sys
 
 import hf_transfer
 from loguru import logger
+from .pixtral import Pixtral
 
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
@@ -42,6 +43,7 @@ AVAILABLE_MODELS = {
     "vila": "VILA",
     "xcomposer2_4KHD": "XComposer2_4KHD",
     "xcomposer2d5": "XComposer2D5",
+    "pixtral":"Pixtral",
 }
 
 
