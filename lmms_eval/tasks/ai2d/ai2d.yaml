@@ -1,4 +1,4 @@
-dataset_path: lmms-lab/ai2d
+dataset_path: /data/mxy/HybridSSM/Benchmark/ai2d
 task: "ai2d"
 dataset_kwargs:
   token: True

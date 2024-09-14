@@ -273,7 +273,6 @@ def parse_eval_args() -> argparse.Namespace:
 def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
     if not args:
         args = parse_eval_args()
-
     # Check if no arguments were passed after parsing
     if len(sys.argv) == 1:
         print("┌───────────────────────────────────────────────────────────────────────────────┐")
@@ -357,7 +356,6 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
 
 def cli_evaluate_single(args: Union[argparse.Namespace, None] = None) -> None:
     selected_task_list = args.tasks.split(",") if args.tasks else None
-
     if args.include_path is not None:
         eval_logger.info(f"Including path: {args.include_path}")
     task_manager = TaskManager(args.verbosity, include_path=args.include_path)
