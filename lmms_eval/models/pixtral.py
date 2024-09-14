@@ -177,9 +177,6 @@ class Pixtral(lmms):
             if isinstance(contexts, tuple):
                 contexts = list(contexts)
 
-            for i in range(len(contexts)):
-                if "<image>" in contexts[i]:
-                    contexts[i] = contexts[i].replace("<image>", "")
             # Similar to llava, is visual paths has len 0
             # Then nothing will be executed
 
