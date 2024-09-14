@@ -237,12 +237,14 @@ class Pixtral(lmms):
             out_tokens, _ = generate(
                 [tokens], 
                 self.model, 
+                images=[images],
                 max_tokens=gen_kwargs["max_new_tokens"], 
                 temperature=gen_kwargs["temperature"], 
                 eos_id=self.tokenizer.instruct_tokenizer.tokenizer.eos_id)
 
             result = self.tokenizer.decode(out_tokens[0])
-
+            
+            print("result:",result)
             # Generate response based on the tokens and generation parameters
             res.append(result)
 
