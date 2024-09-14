@@ -3,10 +3,12 @@ import uuid
 import base64
 import warnings
 from typing import List, Optional, Tuple, Union
+from copy import deepcopy
 import torch
 import numpy as np
 from io import BytesIO
 from accelerate import Accelerator, DistributedType
+from vllm import LLM, SamplingParams
 from tqdm import tqdm
 from PIL import Image
 try:
@@ -34,15 +36,15 @@ warnings.filterwarnings("ignore")
 
 from loguru import logger as eval_logger
 
-@register_model("pixtral")
-class Pixtral(lmms):
+@register_model("pixtral_vllm")
+class Pixtral_vllm(lmms):
     """
     Pixtral Model based on pixtral-12b-240910
     """
 
     def __init__(
         self,
-        pretrained: str = "pixtral",
+        pretrained: str = "pixtral_vllm",
         device: Optional[str] = "cuda",
         batch_size: Optional[Union[int, str]] = 1,
         modality: str = "video",
@@ -56,8 +58,8 @@ class Pixtral(lmms):
         # Initialize Accelerator for multi-device
         accelerator = Accelerator()
         self._device = torch.device(f"cuda:{accelerator.local_process_index}") if accelerator.num_processes > 1 else device
-        self._model = LLM(model=model_name, tokenizer_mode="mistral", limit_mm_per_prompt={"image": max_img_per_msg}, 
-          max_model_len=32768, enable_chunked_prefill=False, device="auto")
+        self._model = LLM(model="/data/mxy/models/Pixtral-12B-240910", tokenizer_mode="mistral", limit_mm_per_prompt={"image":10},
+          max_model_len=32768, enable_chunked_prefill=False, device=self._device)
         self.modality = modality
         self.max_frames_num = max_frames_num
 
@@ -86,7 +88,6 @@ class Pixtral(lmms):
             self._rank = self.accelerator.local_process_index
             self._world_size = self.accelerator.num_processes
         else:
-            self.model.to(self._device)
             self._rank = 0
             self._word_size = 1
     
@@ -174,50 +175,33 @@ class Pixtral(lmms):
                     frames = self.encode_video(visual, self.max_frames_num)
                     imgs.extend(frames)
 
+            messages=[]
 
-            if isinstance(contexts, tuple):
-                contexts = list(contexts)
-
-            # Similar to llava, is visual paths has len 0
-            # Then nothing will be executed
-
-            request = ChatCompletionRequest(
-                messages=[],
-                model="pixtral",
-            )
-
-            # 创建消息时根据是否存在图片标记来处理上下文和图片
+            # If there is no image token in the context, append the image to the text
             if self.image_token not in contexts:
-                # 没有图片标记时，将文本和图片一起添加到消息中
-                message = UserMessage(
-                    content=[
-                        TextChunk(text=contexts)
-                    ]
-                )
-                # 将所有图片添加到消息内容中
-                for img in imgs:
-                    message.content.append(
-                        ImageURLChunk(image_url=f"data:image/png;base64,{img}")
-                    )
-                # 将消息添加到请求中
-                request.messages.append(message)
-
-            else:
-                # 如果上下文中有图片标记，则分割文本并插入对应的图片
-                contexts_split = contexts.split(self.image_token)
+                # Create a message with only one image at a time
                 for idx, img in enumerate(imgs):
-                    message = UserMessage(
-                        content=[
-                            TextChunk(text=contexts_split[idx]),
-                            ImageURLChunk(image_url=f"data:image/png;base64,{img}")
-                        ]
-                    )
-                    # 将消息添加到请求中
-                    request.messages.append(message)
+                    message_content = [{"type": "text", "text": contexts}]
+                    message_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
+                    
+                    # Add each message separately to avoid multiple images in one request
+                    messages.append({"role": "user", "content": message_content})
+            else:
+                # Split contexts by the image token
+                contexts_split = contexts.split(self.image_token)
+                
+                # For each part of the context, pair it with the corresponding image
+                for idx, img in enumerate(imgs):
+                    message_content = [{"type": "text", "text": contexts_split[idx]}]
+                    message_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
+                    
+                    # Add each message separately to avoid multiple images in one request
+                    messages.append({"role": "user", "content": message_content})
 
-            # Tokenize input
-            tokenized = self.tokenizer.encode_chat_completion(request)
-            tokens, text, images = tokenized.tokens, tokenized.text, tokenized.images
+                # Add the last chunk of context without an image if it exists
+                if len(contexts_split) > len(imgs):
+                    messages.append({"role": "user", "content": [{"type": "text", "text": contexts_split[-1]}]})
+            
             
             if "image_sizes" not in gen_kwargs:
                 try:
@@ -225,27 +209,27 @@ class Pixtral(lmms):
                 except:
                     gen_kwargs["image_sizes"] = None
             if "max_new_tokens" not in gen_kwargs:
-                gen_kwargs["max_new_tokens"] = 1024
+                gen_kwargs["max_new_tokens"] = 8192
             if "temperature" not in gen_kwargs:
                 gen_kwargs["temperature"] = 0
             if "top_p" not in gen_kwargs:
                 gen_kwargs["top_p"] = None
             if "num_beams" not in gen_kwargs:
                 gen_kwargs["num_beams"] = 1
-            
-            
 
-            out_tokens, _ = generate(
-                [tokens], 
-                self.model, 
-                images=[images],
-                max_tokens=gen_kwargs["max_new_tokens"], 
-                temperature=gen_kwargs["temperature"], 
-                eos_id=self.tokenizer.instruct_tokenizer.tokenizer.eos_id)
-
-            result = self.tokenizer.decode(out_tokens[0])
             
-            # print("result:",result)
+            sampling_params = SamplingParams(
+                max_tokens=gen_kwargs["max_new_tokens"],
+                temperature=gen_kwargs["temperature"],
+                use_beam_search=False,
+                best_of=gen_kwargs["num_beams"],
+                top_p=gen_kwargs["top_p"],
+            )
+            
+            outputs = self._model.chat(messages=messages, sampling_params=sampling_params)
+            
+            result=outputs[0].outputs[0].text
+            print("result:",result)
             # Generate response based on the tokens and generation parameters
             res.append(result)
 
