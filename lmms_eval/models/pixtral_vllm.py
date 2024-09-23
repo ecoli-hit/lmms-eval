@@ -5,6 +5,7 @@ import warnings
 from typing import List, Optional, Tuple, Union
 from copy import deepcopy
 import torch
+import decord
 import numpy as np
 from io import BytesIO
 from accelerate import Accelerator, DistributedType
@@ -48,7 +49,7 @@ class Pixtral_vllm(lmms):
         device: Optional[str] = "cuda",
         batch_size: Optional[Union[int, str]] = 1,
         modality: str = "video",
-        max_frames_num: int = 10,
+        max_frames_num: int = 64,
         use_cache=True,
         **kwargs,
     ) -> None:
@@ -58,8 +59,8 @@ class Pixtral_vllm(lmms):
         # Initialize Accelerator for multi-device
         accelerator = Accelerator()
         self._device = torch.device(f"cuda:{accelerator.local_process_index}") if accelerator.num_processes > 1 else device
-        self._model = LLM(model="/data/mxy/models/Pixtral-12B-240910", tokenizer_mode="mistral", limit_mm_per_prompt={"image":10},
-          max_model_len=32768, enable_chunked_prefill=False, device=self._device)
+        self._model = LLM(model="/data/mxy/models/Pixtral-12B-240910", tokenizer_mode="mistral", limit_mm_per_prompt={"image":max_frames_num},
+          max_model_len=128000, enable_chunked_prefill=False, device=self._device)
         self.modality = modality
         self.max_frames_num = max_frames_num
 
@@ -101,20 +102,33 @@ class Pixtral_vllm(lmms):
 
     # Function to encode the video
     def encode_video(self, video_path, for_get_frames_num):
-        vr = VideoReader(video_path, ctx=cpu(0))
-        total_frame_num = len(vr)
-        uniform_sampled_frames = np.linspace(0, total_frame_num - 1, for_get_frames_num, dtype=int)
+        target_width=360
+        target_height=240
+        
+        imgs=[]
+        
+        try:
+            if type(video_path) == str:
+                vr = VideoReader(video_path, ctx=cpu(0), width=target_width, height=target_height)
+            else:
+                vr = VideoReader(video_path[0], ctx=cpu(0), width=target_width, height=target_height)
 
-        # Ensure the last frame is included
-        if total_frame_num - 1 not in uniform_sampled_frames:
-            uniform_sampled_frames = np.append(uniform_sampled_frames, total_frame_num - 1)
+            total_frame_num = len(vr)
+            uniform_sampled_frames = np.linspace(0, total_frame_num - 1, for_get_frames_num, dtype=int)
 
-        frame_idx = uniform_sampled_frames.tolist()
-        frames = vr.get_batch(frame_idx).asnumpy()
+            # Ensure the last frame is included
+            if total_frame_num - 1 not in uniform_sampled_frames:
+                uniform_sampled_frames = np.append(uniform_sampled_frames, total_frame_num - 1)
+
+            frame_idx = uniform_sampled_frames.tolist()
+            frames = vr.get_batch(frame_idx).asnumpy()
+            for frame in frames:
+                imgs.append(Image.fromarray(frame))
+        except Exception as e:
+            imgs=[Image.new("RGB", (target_width, target_height), (0, 0, 0))] * for_get_frames_num
 
         base64_frames = []
-        for frame in frames:
-            img = Image.fromarray(frame)
+        for img in imgs:
             output_buffer = BytesIO()
             img.save(output_buffer, format="PNG")
             byte_data = output_buffer.getvalue()
@@ -167,13 +181,22 @@ class Pixtral_vllm(lmms):
             visuals = [doc_to_visual(self.task_dict[task][split][doc_id])]
             visuals = self.flatten(visuals)
             imgs = []  # multiple images or frames for video
+            # flag = True
             for visual in visuals:
                 if self.modality == "image":
                     img = self.encode_image(visual)
                     imgs.append(img)
                 elif self.modality == "video":
                     frames = self.encode_video(visual, self.max_frames_num)
+            #         if frames == False:
+            #             flag = False
+            #             break
                     imgs.extend(frames)
+                    
+            # if flag == False:
+            #     res.append("No answer")
+            #     pbar.update(1)
+            #     continue
 
             messages=[]
 
@@ -222,14 +245,13 @@ class Pixtral_vllm(lmms):
                 max_tokens=gen_kwargs["max_new_tokens"],
                 temperature=gen_kwargs["temperature"],
                 use_beam_search=False,
-                best_of=gen_kwargs["num_beams"],
                 top_p=gen_kwargs["top_p"],
             )
             
             outputs = self._model.chat(messages=messages, sampling_params=sampling_params)
             
             result=outputs[0].outputs[0].text
-            print("result:",result)
+            # print("result:",result)
             # Generate response based on the tokens and generation parameters
             res.append(result)
 

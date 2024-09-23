@@ -4,8 +4,6 @@ import sys
 
 import hf_transfer
 from loguru import logger
-from .pixtral import Pixtral
-from .pixtral_vllm import Pixtral_vllm
 
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 

@@ -306,6 +306,7 @@ class VILA(lmms):
             else:
                 qs = (DEFAULT_IMAGE_TOKEN + "\n") * len(images) + qs
 
+            
             # This is much safer for llama3, as we now have some object type in it
             # if "llama_3" in self.conv_template:
             #     conv = copy.deepcopy(conv_templates[self.conv_template])
@@ -361,8 +362,8 @@ class VILA(lmms):
                 # output_ids = self.model.generate(inputs=input_ids, images=videos, attention_mask=attention_masks, modalities="video", do_sample=True, temperature=0.2, max_new_tokens=50,use_cache=True)
 
             outputs = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-            print("Question: ", cur_prompt)
-            print("Answer: ", outputs)
+            # print("Question: ", cur_prompt)
+            # print("Answer: ", outputs)
             res.append(outputs)
             pbar.update(1)
         return res

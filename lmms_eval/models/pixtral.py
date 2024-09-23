@@ -2,6 +2,7 @@ import os
 import uuid
 import base64
 import warnings
+import decord
 from typing import List, Optional, Tuple, Union
 import torch
 import numpy as np
@@ -46,7 +47,7 @@ class Pixtral(lmms):
         device: Optional[str] = "cuda",
         batch_size: Optional[Union[int, str]] = 1,
         modality: str = "video",
-        max_frames_num: int = 10,
+        max_frames_num: int = 64,
         use_cache=True,
         **kwargs,
     ) -> None:
@@ -56,8 +57,7 @@ class Pixtral(lmms):
         # Initialize Accelerator for multi-device
         accelerator = Accelerator()
         self._device = torch.device(f"cuda:{accelerator.local_process_index}") if accelerator.num_processes > 1 else device
-        self._model = LLM(model=model_name, tokenizer_mode="mistral", limit_mm_per_prompt={"image": max_img_per_msg}, 
-          max_model_len=32768, enable_chunked_prefill=False, device="auto")
+        self._model = Transformer.from_folder("/data/mxy/models/Pixtral-12B-240910",device=self._device)
         self.modality = modality
         self.max_frames_num = max_frames_num
 
@@ -100,20 +100,33 @@ class Pixtral(lmms):
 
     # Function to encode the video
     def encode_video(self, video_path, for_get_frames_num):
-        vr = VideoReader(video_path, ctx=cpu(0))
-        total_frame_num = len(vr)
-        uniform_sampled_frames = np.linspace(0, total_frame_num - 1, for_get_frames_num, dtype=int)
+        target_width=360
+        target_height=240
+        
+        imgs=[]
+        
+        try:
+            if type(video_path) == str:
+                vr = VideoReader(video_path, ctx=cpu(0), width=target_width, height=target_height)
+            else:
+                vr = VideoReader(video_path[0], ctx=cpu(0), width=target_width, height=target_height)
 
-        # Ensure the last frame is included
-        if total_frame_num - 1 not in uniform_sampled_frames:
-            uniform_sampled_frames = np.append(uniform_sampled_frames, total_frame_num - 1)
+            total_frame_num = len(vr)
+            uniform_sampled_frames = np.linspace(0, total_frame_num - 1, for_get_frames_num, dtype=int)
 
-        frame_idx = uniform_sampled_frames.tolist()
-        frames = vr.get_batch(frame_idx).asnumpy()
+            # Ensure the last frame is included
+            if total_frame_num - 1 not in uniform_sampled_frames:
+                uniform_sampled_frames = np.append(uniform_sampled_frames, total_frame_num - 1)
+
+            frame_idx = uniform_sampled_frames.tolist()
+            frames = vr.get_batch(frame_idx).asnumpy()
+            for frame in frames:
+                imgs.append(Image.fromarray(frame))
+        except Exception as e:
+            imgs=[Image.new("RGB", (target_width, target_height), (0, 0, 0))] * for_get_frames_num
 
         base64_frames = []
-        for frame in frames:
-            img = Image.fromarray(frame)
+        for img in imgs:
             output_buffer = BytesIO()
             img.save(output_buffer, format="PNG")
             byte_data = output_buffer.getvalue()
