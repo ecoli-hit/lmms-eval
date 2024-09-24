@@ -29,6 +29,7 @@ AVAILABLE_MODELS = {
     "llava_sglang": "LlavaSglang",
     "llava_vid": "LlavaVid",
     "longva": "LongVA",
+    "LongLLaVA": "LongLLaVA", 
     "mantis": "Mantis",
     "minicpm_v": "MiniCPM_V",
     "minimonkey": "MiniMonkey",
